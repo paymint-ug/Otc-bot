@@ -1,70 +1,23 @@
-import os
-import requests
-from datetime import datetime
+name: OTC Bot Runner
 
-# These fetch your secret keys from GitHub settings
-API_KEY = os.environ.get("OTC_API_KEY")
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
-# The pairs your free API can access
-PAIRS_TO_SCAN = ["EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "BTCUSD_otc", "AUDUSD_otc"]
-
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": CHAT_ID, "text": message}, timeout=10)
-        print("Signal sent to Telegram!")
-    except Exception as e:
-        print(f"Telegram error: {e}")
-
-def main():
-    for pair in PAIRS_TO_SCAN:
-        try:
-            # Fetch 100 1-minute candles for the OTC pair
-            url = f"https://api.otcharts.com/v1/candles?symbol={pair}&timeframe=60&limit=100"
-            headers = {"Authorization": f"Bearer {API_KEY}"}
-            res = requests.get(url, headers=headers, timeout=30)
-            
-            if res.status_code != 200:
-                continue
-                
-            data = res.json()
-            candles = data.get("candles", [])
-            if len(candles) < 100: continue
-            
-            closes = [c['close'] for c in candles]
-            
-            # Calculate EMA 20 and EMA 50
-            ema20 = sum(closes[-20:]) / 20
-            ema50 = sum(closes[-50:]) / 50
-            
-            # Calculate RSI 14
-            gains = [max(0, closes[i]-closes[i-1]) for i in range(1, len(closes))]
-            losses = [max(0, closes[i-1]-closes[i]) for i in range(1, len(closes))]
-            avg_gain = sum(gains[-14:]) / 14
-            avg_loss = sum(losses[-14:]) / 14
-            rsi = 100 - (100 / (1 + (avg_gain/avg_loss))) if avg_loss > 0 else 100
-            
-            curr = candles[-1]
-            prev = candles[-2]
-            
-            # Check if trend is too weak
-            if abs(ema20 - ema50) < curr['close'] * 0.0001: continue
-            
-            # BUY Logic
-            if (ema20 > ema50 and prev['close'] >= ema20 and curr['low'] <= ema20 and curr['close'] > ema20 and curr['close'] > curr['open'] and 50 < rsi < 65):
-                send_telegram(f"🚨 OTC SIGNAL 🚨\nPAIR: {pair.upper()}\nACTION: 🟢 BUY / UP\nPRICE: {curr['close']}")
-            
-            # SELL Logic
-            elif (ema20 < ema50 and prev['close'] <= ema20 and curr['high'] >= ema20 and curr['close'] < ema20 and curr['close'] < curr['open'] and 35 < rsi < 50):
-                send_telegram(f"🚨 OTC SIGNAL 🚨\nPAIR: {pair.upper()}\nACTION: 🔴 SELL / DOWN\nPRICE: {curr['close']}")
-                
-        except Exception as e:
-            print(f"Error on {pair}: {e}")
-
-if __name__ == "__main__":
-    main()
-
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: pip install requests
+      - run: python bot.py
+        env:
+          OTC_API_KEY: ${{ secrets.OTC_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
 
 
